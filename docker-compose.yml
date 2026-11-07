@@ -1,0 +1,78 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+      network: host
+    image: hostfolio:latest
+    container_name: hostfolio
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CONTAINER_ROLE: app
+      REDIS_HOST: redis
+      CONTENT_VIEW_DEDUP_STORE: redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - app_storage_hostfolio:/var/www/storage
+    networks:
+      - app_network
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 9000, $$errno, $$errstr, 2) ? 0 : 1);"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  scheduler:
+    image: hostfolio:latest
+    container_name: hostfolio-scheduler
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CONTAINER_ROLE: scheduler
+      REDIS_HOST: redis
+      CONTENT_VIEW_DEDUP_STORE: redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["php", "artisan", "schedule:work"]
+    volumes:
+      - app_storage_hostfolio:/var/www/storage
+    networks:
+      - app_network
+    depends_on:
+      app:
+        condition: service_started
+
+  nginx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: nginx
+      network: host
+    image: hostfolio-nginx:latest
+    container_name: hostfolio-nginx
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    volumes:
+      - app_storage_hostfolio:/var/www/storage:ro
+    networks:
+      - app_network
+    depends_on:
+      app:
+        condition: service_healthy
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  app_storage_hostfolio:
