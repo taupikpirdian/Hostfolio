@@ -7,6 +7,36 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## Run with Docker Compose
+
+Requirements: Docker Engine with the Compose plugin, plus PHP and Composer for generating the application key.
+
+1. Copy `.env.example` to `.env`.
+2. Set `APP_URL=http://localhost:8080`, `SESSION_SECURE_COOKIE=false`, and unique values for `DB_PASSWORD` and `DB_ROOT_PASSWORD` in `.env`.
+3. Install Composer dependencies if needed, then generate the application key:
+
+   ```sh
+   composer install
+   php artisan key:generate
+   ```
+
+4. Build the images, start MySQL, apply migrations, then start the app:
+
+   ```sh
+   docker compose build app web backup
+   docker compose up -d mysql
+   docker compose run --rm migrate
+   docker compose up -d app web scheduler backup
+   ```
+
+5. Open [http://localhost:8080](http://localhost:8080). Create an administrator interactively:
+
+   ```sh
+   docker compose exec app php artisan hostfolio:create-admin
+   ```
+
+The `app` container runs PHP-FPM and `web` runs Nginx. MySQL data and Laravel storage are kept in named volumes. For deployment behind HTTPS, set `APP_URL` to the HTTPS address and `SESSION_SECURE_COOKIE=true`; see `sh docker/hostfolio.sh --help` for deployment and backup commands.
+
 ## About Laravel
 
 Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:

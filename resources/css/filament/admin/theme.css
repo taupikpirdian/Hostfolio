@@ -1,0 +1,6 @@
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@source '../../../../app/Filament/**/*.php';
+@source '../../../views/filament/**/*.blade.php';

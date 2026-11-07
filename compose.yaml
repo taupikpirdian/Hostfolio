@@ -1,0 +1,52 @@
+name: hostfolio
+
+services:
+  app:
+    build:
+      context: .
+      target: app
+    image: hostfolio-app:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - app-storage:/var/www/html/storage
+    healthcheck:
+      test: [CMD, php, -r, "exit(@fsockopen('127.0.0.1', 9000) ? 0 : 1);"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  scheduler:
+    image: hostfolio-app:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: [php, artisan, schedule:work, --no-interaction]
+    volumes:
+      - app-storage:/var/www/html/storage
+    depends_on:
+      app:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      target: web
+    image: hostfolio-web:local
+    restart: unless-stopped
+    ports:
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8080}:80"
+    volumes:
+      - app-storage:/var/www/html/storage:ro
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  app-storage:
