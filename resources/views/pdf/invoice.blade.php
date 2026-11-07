@@ -8,25 +8,27 @@
         .topline { background: #2563eb; height: 5px; left: 0; position: fixed; right: 0; top: -38px; }
         .muted { color: #7183a1; }
         .blue { color: #285be8; }
-        .top, .summary, .items, .bottom, .totals { border-collapse: collapse; width: 100%; }
-        .top td { vertical-align: top; }
+        .top, .items, .bottom, .totals, .invoice-meta { border-collapse: collapse; width: 100%; }
+        .top td { vertical-align: middle; }
         .brand { font-size: 22px; font-weight: bold; letter-spacing: -.5px; }
         .brand-mark { background: #eaf0ff; border-radius: 10px; color: #285be8; display: inline-block; font-size: 17px; font-weight: bold; margin-right: 9px; padding: 11px 12px; }
         .brand-sub { font-size: 9px; letter-spacing: 1px; margin-left: 52px; margin-top: 2px; }
         .document-pill { background: #edf2ff; border-radius: 20px; color: #285be8; font-size: 10px; letter-spacing: 2px; padding: 12px 18px; }
-        .hero { margin-top: 55px; width: 100%; }
-        .hero td { vertical-align: bottom; }
-        .eyebrow { color: #285be8; font-size: 12px; font-weight: bold; letter-spacing: 1.5px; }
-        h1 { font-size: 46px; letter-spacing: -2px; margin: 4px 0; }
-        .doc-number { font-size: 17px; font-weight: bold; margin-top: 7px; }
-        .status { background: #e4f6ef; border-radius: 7px; color: #07875e; font-size: 10px; margin-top: 12px; padding: 8px 10px; text-align: left; }
-        .rule { border-top: 1px solid #dce5f1; margin: 28px 0; }
-        .summary td { vertical-align: top; width: 50%; }
-        .label { color: #7183a1; font-size: 10px; font-weight: bold; letter-spacing: .8px; margin-bottom: 12px; }
-        .party { font-size: 20px; font-weight: bold; margin-bottom: 7px; }
-        .meta-row { margin: 0 0 9px; }
-        .meta-row .value { float: right; font-weight: bold; }
-        h2 { font-size: 16px; margin: 34px 0 12px; }
+        .invoice-meta { font-size: 10px; margin-top: 18px; }
+        .invoice-meta td { padding: 5px 3px; }
+        .invoice-meta .meta-label { color: #7183a1; text-align: left; width: 110px; }
+        .invoice-meta .meta-separator { color: #7183a1; text-align: center; width: 18px; }
+        .invoice-meta .meta-value { font-weight: bold; text-align: left; }
+        .status-pill { background: #e4f6ef; border-radius: 14px; color: #07875e; display: inline-block; font-size: 9px; font-weight: bold; padding: 5px 13px; }
+        .status-pill.draft { background: #edf2ff; color: #285be8; }
+        .status-pill.void { background: #fee2e2; color: #b91c1c; }
+        .status-pill.unpaid { background: #fff1d6; color: #9a5700; }
+        .status-pill.partial { background: #fff1d6; color: #9a5700; }
+        .header-rule { border-bottom: 2px solid #c9d8ff; margin: 27px 0 24px; position: relative; }
+        .header-rule:before { background: #285be8; border-radius: 3px; content: ''; height: 4px; left: 0; position: absolute; top: -1px; width: 90px; }
+        .recipient { color: #7183a1; font-size: 10px; margin-bottom: 25px; }
+        .recipient strong { color: #14213d; font-size: 12px; }
+        h2 { font-size: 16px; margin: 0 0 12px; }
         .items th { background: #edf2fa; color: #405675; font-size: 9px; letter-spacing: .5px; text-align: left; }
         .items th, .items td { padding: 10px 8px; }
         .items td { border-bottom: 1px solid #e5ebf3; vertical-align: top; }
@@ -52,6 +54,21 @@
         $organizationName = filled($invoiceSettings['organization_name'] ?? null) ? $invoiceSettings['organization_name'] : config('app.name');
         $issuerDetails = array_filter([$invoiceSettings['contact_email'] ?? null, $invoiceSettings['address'] ?? null], fn ($value): bool => filled($value));
         $paymentInformation = filled($invoiceSettings['payment_information'] ?? null) ? $invoiceSettings['payment_information'] : 'Detail rekening atau instruksi pembayaran dapat ditambahkan melalui pengaturan penagihan '.$organizationName.'. Cantumkan nomor invoice saat mengonfirmasi pembayaran.';
+        $statusLabel = match ($invoice->status) {
+            'draft' => 'DRAF',
+            'void' => 'DIBATALKAN',
+            default => bccomp($invoice->total, '0', 2) === 0 ? 'TANPA TAGIHAN' : match ($invoice->payment_status) {
+                'paid' => 'LUNAS',
+                'partial' => 'DIBAYAR SEBAGIAN',
+                default => 'BELUM LUNAS',
+            },
+        };
+        $statusClass = match ($invoice->status) {
+            'draft' => 'draft',
+            'void' => 'void',
+            default => $invoice->payment_status === 'partial' ? 'partial' : (bccomp($invoice->outstanding, '0', 2) > 0 ? 'unpaid' : ''),
+        };
+        $statusCaption = in_array($invoice->status, ['draft', 'void'], true) ? 'Status Dokumen' : 'Status Pembayaran';
         $specification = function ($target): array {
             if ($target instanceof \App\Models\ComputeInstance) {
                 $allocation = $target->currentAllocation;
@@ -76,34 +93,28 @@
     @endphp
     <div class="topline"></div>
     <table class="top"><tr>
-        <td><span class="brand-mark">◆</span><span class="brand">{{ $organizationName }}</span><div class="brand-sub muted">{{ implode(' · ', $issuerDetails) }}</div></td>
-        <td class="right"><span class="document-pill">INVOICE DOCUMENT</span></td>
-    </tr></table>
-
-    <table class="hero"><tr>
-        <td><div class="eyebrow">TAGIHAN LAYANAN</div><h1>Invoice</h1><div class="muted" style="font-size:13px">Rincian biaya layanan infrastruktur</div></td>
-        <td class="right"><div class="label">NOMOR INVOICE</div><div class="doc-number">{{ $invoice->number }}</div><div class="status">● &nbsp;{{ strtoupper($invoice->status) }}</div></td>
-    </tr></table>
-
-    <div class="rule"></div>
-    <table class="summary"><tr>
-        <td style="padding-right:24px"><div class="label">{{ $invoice->type === 'payable' ? 'DITAGIHKAN OLEH' : 'DITAGIHKAN KEPADA' }}</div><div class="party">{{ $invoice->party->name }}</div><div class="muted">{{ $invoice->party->email }}<br>{{ $invoice->party->address }}</div></td>
-        <td style="padding-left:24px"><div class="label">INFORMASI INVOICE</div>
-            <div class="meta-row">Tanggal terbit <span class="value">{{ $invoice->issue_date?->format('d M Y') ?? '—' }}</span></div>
-            <div class="meta-row">Jatuh tempo <span class="value">{{ $invoice->due_date?->format('d M Y') ?? '—' }}</span></div>
-            <div class="meta-row">Periode tagihan <span class="value">{{ $invoice->period_start?->format('d M Y') ?? '—' }} – {{ $invoice->period_end?->format('d M Y') ?? '—' }}</span></div>
-            <div class="meta-row">Mata uang <span class="value">{{ $currencyLabel }}</span></div>
+        <td style="width:55%"><span class="brand-mark">◆</span><span class="brand">{{ $organizationName }}</span><div class="brand-sub muted">INVENTORY &amp; BILLING</div>@if ($issuerDetails)<div class="brand-sub muted" style="letter-spacing:0">{{ implode(' · ', $issuerDetails) }}</div>@endif</td>
+        <td style="width:45%" class="right"><div><span class="document-pill">INVOICE</span></div>
+            <table class="invoice-meta">
+                <tr><td class="meta-label">No. Invoice</td><td class="meta-separator">:</td><td class="meta-value">{{ $invoice->number }}</td></tr>
+                <tr><td class="meta-label">Tanggal Terbit</td><td class="meta-separator">:</td><td class="meta-value">{{ $invoice->issue_date?->format('d M Y') ?? '—' }}</td></tr>
+                <tr><td class="meta-label">{{ $statusCaption }}</td><td class="meta-separator">:</td><td class="meta-value"><span class="status-pill {{ $statusClass }}">{{ $statusLabel }}</span></td></tr>
+            </table>
         </td>
     </tr></table>
 
-    <h2>Rincian Tagihan <span class="muted" style="float:right;font-size:9px;font-weight:normal">{{ $invoice->items->count() }} item</span></h2>
+    <div class="header-rule"></div>
+    <div class="recipient">{{ $invoice->type === 'payable' ? 'DITAGIHKAN OLEH' : 'DITAGIHKAN KEPADA' }} &nbsp; <strong>{{ $invoice->party->name }}</strong> &nbsp; {{ $invoice->party->email }} &nbsp; {{ $invoice->party->address }}</div>
+
+    <h2>Rincian Tagihan <span class="muted" style="float:right;font-size:9px;font-weight:normal">{{ $invoice->items->count() }} item · 1 invoice</span></h2>
     <table class="items">
-        <thead><tr><th style="width:50%">DESKRIPSI</th><th style="width:12%">QTY</th><th class="right" style="width:19%">HARGA SATUAN</th><th class="right" style="width:19%">JUMLAH</th></tr></thead>
+        <thead><tr><th style="width:45%">DESKRIPSI</th><th style="width:20%">PERIODE</th><th style="width:8%">QTY</th><th class="right" style="width:14%">HARGA SATUAN</th><th class="right" style="width:13%">JUMLAH</th></tr></thead>
         <tbody>
         @foreach ($invoice->items as $item)
             @php($specs = $specification($item->target))
             <tr>
                 <td><div class="description">{{ $item->description }}</div>@if ($specs)<div class="spec">{{ implode(' · ', $specs) }}</div>@endif</td>
+                <td>{{ $invoice->period_start?->format('d M Y') ?? '—' }}<br>– {{ $invoice->period_end?->format('d M Y') ?? '—' }}</td>
                 <td>{{ rtrim(rtrim(number_format((float) $item->quantity, 4, ',', '.'), '0'), ',') }}</td>
                 <td class="right">{{ $currency }} {{ $formatAmount($item->unit_price) }}</td>
                 <td class="right">{{ $currency }} {{ $formatAmount($item->total) }}</td>

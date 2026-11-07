@@ -6,6 +6,7 @@ use App\Models\BillingContract;
 use App\Models\ComputeInstance;
 use App\Models\ApplicationSetting;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 
@@ -17,8 +18,12 @@ class ContractUnpaidInvoicePdfController
         $validated = $request->validate([
             'contracts' => ['required', 'array', 'min:1'],
             'contracts.*' => ['required', 'integer', 'distinct'],
+            'period_month' => ['nullable', 'date_format:Y-m'],
         ]);
         $contractIds = array_map('intval', $validated['contracts']);
+        $periodStart = filled($validated['period_month'] ?? null)
+            ? CarbonImmutable::parse($validated['period_month'].'-01')
+            : null;
         $contracts = BillingContract::query()
             ->whereIn('id', $contractIds)
             ->where(function ($query) use ($computeInstance): void {
@@ -36,6 +41,7 @@ class ContractUnpaidInvoicePdfController
 
             $unpaidInvoices = $contract->invoices()
                 ->where('status', 'issued')
+                ->when($periodStart, fn ($query) => $query->whereBetween('period_start', [$periodStart->toDateString(), $periodStart->endOfMonth()->toDateString()]))
                 ->with(['party', 'items.target', 'payments'])
                 ->orderBy('issue_date')
                 ->orderBy('id')

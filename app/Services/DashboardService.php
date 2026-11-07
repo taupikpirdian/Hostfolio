@@ -88,7 +88,7 @@ class DashboardService
     }
 
     /** @return array<int, array{label: string, income: float, expense: float}> */
-    private function monthlyCashflow(Carbon $from, Carbon $to): array
+    public function monthlyCashflow(Carbon $from, Carbon $to): array
     {
         $rows = Payment::query()
             ->join('invoices', 'invoices.id', '=', 'payments.invoice_id')

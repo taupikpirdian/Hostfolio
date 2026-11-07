@@ -8,6 +8,8 @@ use App\Actions\Billing\RecordPayment;
 use App\Actions\Billing\ReversePayment;
 use App\Actions\Billing\VoidInvoice;
 use App\Filament\Resources\ComputeInstances\Pages\ViewComputeInstance;
+use App\Filament\Pages\BillingOverview;
+use App\Filament\Resources\BillingContracts\Pages\ManageBillingContracts;
 use App\Filament\Resources\Invoices\Pages\ManageInvoices;
 use App\Models\BillingContract;
 use App\Models\ComputeInstance;
@@ -20,12 +22,31 @@ use Filament\Facades\Filament;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\View;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 class BillingWorkflowTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_billing_overview_shows_report_dashboard_with_live_data(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $invoice = Invoice::factory()->create([
+            'party_id' => Party::factory(), 'status' => 'issued', 'type' => 'receivable',
+            'issue_date' => today(), 'due_date' => today()->addDays(14), 'total' => '350000.00',
+        ]);
+
+        Livewire::test(BillingOverview::class)
+            ->assertSee('Total Invoiced Income')
+            ->assertSee('Outstanding Receivable')
+            ->assertSee('Tren Cashflow')
+            ->assertSee('Hasil Laporan')
+            ->assertSee($invoice->number)
+            ->assertSee('350.000,00');
+    }
 
     public function test_manual_invoice_can_be_created_from_compute_instance_detail(): void
     {
@@ -51,6 +72,87 @@ class BillingWorkflowTest extends TestCase
         $this->assertDatabaseHas('invoices', ['number' => 'MANUAL-INV-1', 'total' => '250.00', 'status' => 'draft']);
     }
 
+    public function test_billing_contract_can_be_edited_from_list(): void
+    {
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $instance = ComputeInstance::factory()->create();
+        $party = Party::factory()->create(['type' => 'client']);
+        $contract = BillingContract::create([
+            'number' => 'EDIT-1', 'name' => 'Old plan', 'party_id' => $party->id,
+            'compute_instance_id' => $instance->id, 'direction' => 'income', 'amount' => '250.00',
+            'currency' => 'IDR', 'start_date' => today(), 'starts_at' => today(),
+            'first_billing_date' => today(), 'next_billing_date' => today(),
+            'billing_cycle' => 'monthly', 'status' => 'active', 'auto_generate' => true,
+        ]);
+
+        Livewire::test(ManageBillingContracts::class)
+            ->callTableAction('edit', $contract, data: [
+                'number' => 'EDIT-1', 'name' => 'New plan', 'party_id' => $party->id,
+                'direction' => 'income', 'amount' => '300.00', 'currency' => 'IDR',
+                'starts_at' => today()->toDateString(), 'first_billing_date' => today()->toDateString(),
+                'billing_cycle' => 'monthly', 'auto_generate' => false, 'status' => 'active',
+                'generate_days_before' => 7, 'payment_terms_days' => 14,
+            ])->assertHasNoTableActionErrors();
+
+        $this->assertSame('New plan', $contract->fresh()->name);
+        $this->assertSame('300.00', $contract->fresh()->amount);
+        $this->assertFalse($contract->fresh()->auto_generate);
+        $this->assertSame(7, $contract->fresh()->generate_days_before);
+    }
+
+    public function test_billing_contract_can_be_edited_from_compute_instance_tab(): void
+    {
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $instance = ComputeInstance::factory()->create();
+        $party = Party::factory()->create(['type' => 'client']);
+        $contract = BillingContract::create([
+            'number' => 'TAB-EDIT-1', 'name' => 'Old tab plan', 'party_id' => $party->id,
+            'compute_instance_id' => $instance->id, 'direction' => 'income', 'amount' => '250.00',
+            'currency' => 'IDR', 'start_date' => today(), 'starts_at' => today(),
+            'first_billing_date' => today(), 'next_billing_date' => today(),
+            'billing_cycle' => 'monthly', 'status' => 'active', 'auto_generate' => true,
+        ]);
+
+        Livewire::test(ViewComputeInstance::class, ['record' => $instance->id])
+            ->assertSee('Edit')
+            ->callAction('editBillingContract', arguments: ['contract_id' => $contract->id], data: [
+                'number' => 'TAB-EDIT-1', 'name' => 'New tab plan', 'party_id' => $party->id,
+                'direction' => 'income', 'amount' => '350.00', 'currency' => 'IDR',
+                'starts_at' => today()->toDateString(), 'first_billing_date' => today()->toDateString(),
+                'billing_cycle' => 'monthly', 'auto_generate' => false, 'status' => 'active',
+                'generate_days_before' => 7, 'payment_terms_days' => 14,
+            ])->assertHasNoActionErrors();
+
+        $this->assertSame('New tab plan', $contract->fresh()->name);
+        $this->assertSame('350.00', $contract->fresh()->amount);
+    }
+
+    public function test_compute_instance_contract_actions_show_invoices_in_modal(): void
+    {
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $instance = ComputeInstance::factory()->create();
+        $party = Party::factory()->create(['type' => 'client']);
+        $contract = BillingContract::create([
+            'number' => 'TAB-VIEW-1', 'name' => 'Modal plan', 'party_id' => $party->id,
+            'compute_instance_id' => $instance->id, 'direction' => 'income', 'amount' => '250.00',
+            'currency' => 'IDR', 'start_date' => today(), 'starts_at' => today(),
+            'first_billing_date' => today(), 'next_billing_date' => today(),
+            'billing_cycle' => 'monthly', 'status' => 'active',
+        ]);
+        Invoice::factory()->create([
+            'number' => 'INV-TAB-1', 'billing_contract_id' => $contract->id, 'party_id' => $party->id,
+        ]);
+
+        $page = Livewire::test(ViewComputeInstance::class, ['record' => $instance->id])
+            ->assertSee('Aksi kontrak TAB-VIEW-1')
+            ->assertSee('Lihat Invoice')
+            ->assertDontSee('INV-TAB-1')
+            ->mountAction('viewContractInvoices', ['contract_id' => $contract->id])
+            ->assertSet('mountedActions.0.name', 'viewContractInvoices');
+
+        $this->assertStringContainsString('INV-TAB-1', $page->instance()->getMountedAction()->getModalContent()->render());
+    }
+
     public function test_invoice_pdf_contains_item_and_instance_details(): void
     {
         $this->actingAs(User::factory()->create(['role' => 'admin']));
@@ -65,6 +167,56 @@ class BillingWorkflowTest extends TestCase
         $response = $this->get(route('invoices.pdf', $invoice));
         $response->assertOk()->assertHeader('content-type', 'application/pdf');
         $this->assertStringStartsWith('%PDF', $response->getContent());
+    }
+
+    public function test_invoice_pdf_uses_customer_facing_payment_status_instead_of_issued(): void
+    {
+        $invoice = Invoice::factory()->create(['party_id' => Party::factory()]);
+        $invoice->items()->create(['description' => 'Hosting', 'quantity' => '1', 'unit_price' => '250.00']);
+        app(IssueInvoice::class)->execute($invoice);
+
+        $html = view('pdf.invoice', ['invoice' => $invoice->fresh()->load(['party', 'items.target', 'payments']), 'invoiceSettings' => []])->render();
+
+        $this->assertStringContainsString('BELUM LUNAS', $html);
+        $this->assertStringNotContainsString('>ISSUED<', $html);
+    }
+
+    public function test_contract_invoice_pdf_filters_by_optional_period_month(): void
+    {
+        $instance = ComputeInstance::factory()->create();
+        $party = Party::factory()->create(['type' => 'client']);
+        $contract = BillingContract::create([
+            'number' => 'MONTH-FILTER-1', 'name' => 'Monthly hosting', 'party_id' => $party->id,
+            'compute_instance_id' => $instance->id, 'direction' => 'income', 'amount' => '250.00',
+            'currency' => 'IDR', 'start_date' => '2026-10-01', 'starts_at' => '2026-10-01',
+            'first_billing_date' => '2026-10-01', 'next_billing_date' => '2026-12-01',
+            'billing_cycle' => 'monthly', 'status' => 'active',
+        ]);
+        foreach (['2026-10-01' => 'INV-OCT', '2026-11-01' => 'INV-NOV'] as $periodStart => $number) {
+            $invoice = Invoice::factory()->create([
+                'number' => $number, 'party_id' => $party->id, 'billing_contract_id' => $contract->id,
+                'period_start' => $periodStart, 'period_end' => $periodStart === '2026-10-01' ? '2026-10-31' : '2026-11-30',
+            ]);
+            $invoice->items()->create(['description' => 'Hosting', 'quantity' => '1', 'unit_price' => '250.00']);
+            app(IssueInvoice::class)->execute($invoice);
+        }
+
+        $shownNumbers = [];
+        View::composer('pdf.contract-unpaid-invoices', function ($view) use (&$shownNumbers): void {
+            $shownNumbers = $view->getData()['invoices']->pluck('number')->all();
+        });
+
+        $this->get(route('invoices.contract-unpaid-pdf', ['computeInstance' => $instance, 'contracts' => [$contract->id], 'period_month' => '2026-10']))->assertOk();
+        $this->assertSame(['INV-OCT'], $shownNumbers);
+
+        $this->get(route('invoices.contract-unpaid-pdf', ['computeInstance' => $instance, 'contracts' => [$contract->id]]))->assertOk();
+        $this->assertSame(['INV-OCT', 'INV-NOV'], $shownNumbers);
+
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        Livewire::test(ViewComputeInstance::class, ['record' => $instance->id])
+            ->callAction('generateContractInvoicePdf', data: ['billing_contract_ids' => [$contract->id], 'period_month' => '2026-10'])
+            ->assertHasNoActionErrors()
+            ->assertRedirect(route('invoices.contract-unpaid-pdf', ['computeInstance' => $instance, 'contracts' => [$contract->id], 'period_month' => '2026-10']));
     }
 
     protected function setUp(): void

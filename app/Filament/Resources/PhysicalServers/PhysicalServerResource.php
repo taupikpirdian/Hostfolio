@@ -30,10 +30,15 @@ class PhysicalServerResource extends Resource
 
     public static function table(Table $table): Table
     {
-        return $table->modifyQueryUsing(fn (Builder $query) => $query->with('directInstances.currentAllocation'))->columns([TextColumn::make('code')->sortable()->searchable(), TextColumn::make('name')->sortable()->searchable(), TextColumn::make('provider.name')->sortable()->searchable(), TextColumn::make('cpu_cores')->sortable(), TextColumn::make('ram_mb')->sortable(), TextColumn::make('storage_gb')->sortable(), TextColumn::make('status')->sortable()->badge(), TextColumn::make('allocated_cpu')->label('Allocated vCPU / capacity')->state(function (PhysicalServer $record): string {
+        return $table->modifyQueryUsing(fn (Builder $query) => $query->with('directInstances.currentAllocation'))->columns([TextColumn::make('name')->sortable()->searchable(['name', 'code'])->description(fn (PhysicalServer $record): ?string => $record->code), TextColumn::make('cpu_cores')->sortable(), TextColumn::make('ram_mb')->label('RAM (GB)')->formatStateUsing(fn (?int $state): ?float => $state === null ? null : round($state / 1024, 2))->sortable(), TextColumn::make('storage_gb')->sortable(), TextColumn::make('status')->sortable()->badge()->color(fn (?string $state): ?string => $state === 'active' ? 'success' : null), TextColumn::make('allocated_cpu')->label('Allocated vCPU / capacity')->state(function (PhysicalServer $record): string {
             $summary = $record->allocationSummary();
 
             return $summary['vcpu'].' / '.($record->cpu_cores ?? '?').($summary['cpu_overcommitted'] ? ' — overcommit' : '');
+        }), TextColumn::make('allocated_ram')->label('Allocated RAM / capacity (GB)')->state(function (PhysicalServer $record): string {
+            $allocatedGb = round($record->allocationSummary()['ram_mb'] / 1024, 2);
+            $capacityGb = $record->ram_mb === null ? '?' : round($record->ram_mb / 1024, 2);
+
+            return $allocatedGb.' / '.$capacityGb;
         })])->filters([SelectFilter::make('status')->options(['planned' => 'Planned', 'active' => 'Active', 'inactive' => 'Inactive', 'retired' => 'Retired']), SelectFilter::make('provider')->relationship('provider', 'name')])->recordActions([EditAction::make()])->defaultSort('id', 'desc');
     }
 

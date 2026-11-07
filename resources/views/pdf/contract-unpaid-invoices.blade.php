@@ -8,12 +8,20 @@
         .topline { background: #2563eb; height: 5px; left: 0; position: fixed; right: 0; top: -38px; }
         .muted { color: #7183a1; }
         .blue { color: #285be8; }
-        .top, .summary, .items, .totals { border-collapse: collapse; width: 100%; }
-        .top td { vertical-align: top; }
+        .top, .summary, .items, .totals, .invoice-meta { border-collapse: collapse; width: 100%; }
+        .top td { vertical-align: middle; }
         .brand { font-size: 22px; font-weight: bold; letter-spacing: -.5px; }
         .brand-mark { background: #eaf0ff; border-radius: 10px; color: #285be8; display: inline-block; font-size: 17px; font-weight: bold; margin-right: 9px; padding: 11px 12px; }
         .brand-sub { font-size: 9px; letter-spacing: 1px; margin-left: 52px; margin-top: 2px; }
         .document-pill { background: #edf2ff; border-radius: 20px; color: #285be8; font-size: 10px; letter-spacing: 2px; padding: 12px 18px; }
+        .invoice-meta { font-size: 10px; margin-top: 18px; }
+        .invoice-meta td { padding: 5px 3px; }
+        .invoice-meta .meta-label { color: #7183a1; text-align: left; width: 110px; }
+        .invoice-meta .meta-separator { color: #7183a1; text-align: center; width: 18px; }
+        .invoice-meta .meta-value { font-weight: bold; text-align: left; }
+        .status-pill { background: #fff1d6; border-radius: 14px; color: #9a5700; display: inline-block; font-size: 9px; font-weight: bold; padding: 5px 13px; }
+        .header-rule { border-bottom: 2px solid #c9d8ff; margin: 27px 0 30px; position: relative; }
+        .header-rule:before { background: #285be8; border-radius: 3px; content: ''; height: 4px; left: 0; position: absolute; top: -1px; width: 90px; }
         .hero { margin-top: 55px; width: 100%; }
         .hero td { vertical-align: bottom; }
         .eyebrow { color: #285be8; font-size: 12px; font-weight: bold; letter-spacing: 1.5px; }
@@ -54,18 +62,29 @@
         $organizationName = filled($invoiceSettings['organization_name'] ?? null) ? $invoiceSettings['organization_name'] : config('app.name');
         $issuerDetails = array_filter([$invoiceSettings['contact_email'] ?? null, $invoiceSettings['address'] ?? null], fn ($value): bool => filled($value));
         $paymentInformation = filled($invoiceSettings['payment_information'] ?? null) ? $invoiceSettings['payment_information'] : 'Detail rekening atau instruksi pembayaran dapat ditambahkan melalui pengaturan penagihan '.$organizationName.'. Cantumkan nomor invoice saat mengonfirmasi pembayaran.';
+        $invoiceNumber = $invoiceCount === 1 ? $invoices->first()->number : ($invoiceCount > 1 ? $invoiceCount.' invoice digabung' : '—');
+        $documentStatus = $invoices->contains(fn ($invoice): bool => bccomp($invoice->outstanding, '0', 2) > 0) ? 'BELUM LUNAS' : 'TIDAK ADA TAGIHAN';
+        $dateLabel = $invoiceCount === 1 ? 'Tanggal Terbit' : 'Tanggal Cetak';
+        $dateValue = $invoiceCount === 1 ? $invoices->first()->issue_date?->format('d M Y') : now()->format('d M Y');
     @endphp
     <div class="topline"></div>
     <table class="top"><tr>
-        <td><span class="brand-mark">◆</span><span class="brand">{{ $organizationName }}</span><div class="brand-sub muted">{{ implode(' · ', $issuerDetails) }}</div></td>
-        <td class="right"><span class="document-pill">INVOICE CONTRACT</span></td>
+        <td style="width:55%"><span class="brand-mark">◆</span><span class="brand">{{ $organizationName }}</span><div class="brand-sub muted">INVENTORY &amp; BILLING</div>@if ($issuerDetails)<div class="brand-sub muted" style="letter-spacing:0">{{ implode(' · ', $issuerDetails) }}</div>@endif</td>
+        <td style="width:45%" class="right">
+            <div><span class="document-pill">INVOICE CONTRACT</span></div>
+            <table class="invoice-meta">
+                <tr><td class="meta-label">No. Invoice</td><td class="meta-separator">:</td><td class="meta-value">{{ $invoiceNumber }}</td></tr>
+                <tr><td class="meta-label">{{ $dateLabel }}</td><td class="meta-separator">:</td><td class="meta-value">{{ $dateValue ?? '—' }}</td></tr>
+                <tr><td class="meta-label">Status Tagihan</td><td class="meta-separator">:</td><td class="meta-value"><span class="status-pill">{{ $documentStatus }}</span></td></tr>
+            </table>
+        </td>
     </tr></table>
 
-    <div class="rule"></div>
+    <div class="header-rule"></div>
 
     <h2>Rincian Tagihan <span class="muted" style="float:right;font-size:9px;font-weight:normal">{{ $invoices->sum(fn ($invoice) => $invoice->items->count()) }} item · {{ $invoiceCount }} invoice</span></h2>
     <table class="items">
-        <thead><tr><th style="width:27%">DESKRIPSI</th><th style="width:13%">INVOICE</th><th style="width:15%">PERIODE</th><th style="width:12%">JATUH TEMPO</th><th style="width:7%">QTY</th><th class="right" style="width:13%">HARGA SATUAN</th><th class="right" style="width:13%">JUMLAH</th></tr></thead>
+        <thead><tr><th style="width:32%">DESKRIPSI</th><th style="width:16%">INVOICE</th><th style="width:19%">PERIODE</th><th style="width:8%">QTY</th><th class="right" style="width:13%">HARGA SATUAN</th><th class="right" style="width:12%">JUMLAH</th></tr></thead>
         <tbody>
         @forelse ($invoices as $invoice)
             @foreach ($invoice->items as $item)
@@ -88,16 +107,15 @@
                 @endphp
                 <tr>
                     <td><div class="description">{{ $item->description }}</div>@if ($specs)<div class="spec">{{ implode(' · ', $specs) }}</div>@endif</td>
-                    <td><strong>{{ $invoice->number }}</strong><div class="source">{{ strtoupper($invoice->status) }}</div></td>
+                    <td><strong>{{ $invoice->number }}</strong><div class="source">{{ bccomp($invoice->total, '0', 2) === 0 ? 'TANPA TAGIHAN' : ($invoice->payment_status === 'partial' ? 'DIBAYAR SEBAGIAN' : 'BELUM LUNAS') }}</div></td>
                     <td>{{ $invoice->period_start?->format('d M Y') ?? '—' }}<br>– {{ $invoice->period_end?->format('d M Y') ?? '—' }}</td>
-                    <td>{{ $invoice->due_date?->format('d M Y') ?? '—' }}</td>
                     <td>{{ rtrim(rtrim(number_format((float) $item->quantity, 4, ',', '.'), '0'), ',') }}</td>
                     <td class="right">{{ $currency }} {{ $formatAmount($item->unit_price) }}</td>
                     <td class="right">{{ $currency }} {{ $formatAmount($item->total) }}</td>
                 </tr>
             @endforeach
         @empty
-            <tr><td colspan="7" class="empty">Tidak ada invoice yang belum lunas atau bernilai 0.</td></tr>
+            <tr><td colspan="6" class="empty">Tidak ada invoice yang belum lunas atau bernilai 0.</td></tr>
         @endforelse
         </tbody>
     </table>
@@ -113,6 +131,8 @@
             @endforeach
         </table></td>
     </tr></table>
+
+    <div class="footer">{{ filled($invoiceSettings['invoice_footer'] ?? null) ? $invoiceSettings['invoice_footer'] : 'Dokumen ringkasan invoice diterbitkan melalui '.$organizationName.'. Setiap invoice tetap menjadi dokumen tagihan tersendiri.' }}</div>
 
 </body>
 </html>

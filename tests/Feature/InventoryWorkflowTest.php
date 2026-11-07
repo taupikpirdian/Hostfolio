@@ -154,21 +154,27 @@ class InventoryWorkflowTest extends TestCase
         Filament::setCurrentPanel(Filament::getPanel('admin'));
 
         Livewire::test(ManageComputeInstances::class)
-            ->callAction('create', data: ['name' => 'VM Alokasi', 'type' => 'vm', 'status' => 'active', 'allocation_vcpu' => 2, 'allocation_ram_mb' => 2048])
+            ->callAction('create', data: ['name' => 'VM Alokasi', 'type' => 'vm', 'status' => 'active', 'allocation_vcpu' => 2, 'allocation_ram_gb' => 1.5])
             ->assertHasNoActionErrors();
 
         $instance = ComputeInstance::query()->where('name', 'VM Alokasi')->firstOrFail();
         $this->assertEquals(2, $instance->currentAllocation()->firstOrFail()->vcpu);
+        $this->assertSame(1536, $instance->currentAllocation()->firstOrFail()->ram_mb);
 
         Livewire::test(ManageComputeInstances::class)
-            ->callTableAction('edit', $instance, data: ['name' => 'VM Alokasi Baru', 'type' => 'vm', 'status' => 'active', 'allocation_vcpu' => 4, 'allocation_ram_mb' => 2048])
+            ->mountTableAction('edit', $instance)
+            ->assertTableActionDataSet(['allocation_ram_gb' => 1.5]);
+
+        Livewire::test(ManageComputeInstances::class)
+            ->callTableAction('edit', $instance, data: ['name' => 'VM Alokasi Baru', 'type' => 'vm', 'status' => 'active', 'allocation_vcpu' => 4, 'allocation_ram_gb' => 2.25])
             ->assertHasNoTableActionErrors();
 
         $this->assertSame(2, $instance->allocations()->count());
         $this->assertEquals(4, $instance->currentAllocation()->firstOrFail()->vcpu);
+        $this->assertSame(2304, $instance->currentAllocation()->firstOrFail()->ram_mb);
 
         Livewire::test(ManageComputeInstances::class)
-            ->callTableAction('edit', $instance, data: ['name' => 'VM Alokasi Terbaru', 'type' => 'vm', 'status' => 'active', 'allocation_vcpu' => 4, 'allocation_ram_mb' => 2048])
+            ->callTableAction('edit', $instance, data: ['name' => 'VM Alokasi Terbaru', 'type' => 'vm', 'status' => 'active', 'allocation_vcpu' => 4, 'allocation_ram_gb' => 2.25])
             ->assertHasNoTableActionErrors();
 
         $this->assertSame(2, $instance->allocations()->count());

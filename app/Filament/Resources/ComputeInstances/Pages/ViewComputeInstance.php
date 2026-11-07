@@ -30,8 +30,6 @@ use Illuminate\Support\Str;
 
 class ViewComputeInstance extends ViewRecord
 {
-    public ?int $expandedBillingContractId = null;
-
     protected static string $resource = ComputeInstanceResource::class;
 
     protected string $view = 'filament.resources.compute-instances.view';
@@ -69,6 +67,63 @@ class ViewComputeInstance extends ViewRecord
                 TextInput::make('generate_days_before')->numeric()->default(14)->required(), TextInput::make('payment_terms_days')->numeric()->default(0)->required(),
                 Toggle::make('auto_generate')->default(true), Select::make('status')->options(['draft' => 'Draft', 'active' => 'Active', 'paused' => 'Paused', 'ended' => 'Ended'])->default('active')->required(), Textarea::make('notes'),
             ])->action(fn (array $data) => app(CreateBillingContract::class)->execute($this->getRecord(), $data)),
+            Action::make('editBillingContract')->label('Edit Billing Contract')->visible(fn (): bool => auth()->user()?->canManage('billing') ?? false)
+                ->fillForm(function (array $arguments): array {
+                    $contract = $this->billingContractsForInstance()->findOrFail($arguments['contract_id']);
+                    Gate::authorize('update', $contract);
+
+                    return [
+                        'name' => $contract->name,
+                        'party_id' => $contract->party_id,
+                        'direction' => $contract->direction,
+                        'amount' => $contract->amount,
+                        'currency' => $contract->currency,
+                        'billing_cycle' => $contract->billing_cycle,
+                        'starts_at' => $contract->starts_at?->toDateString() ?? $contract->start_date?->toDateString(),
+                        'first_billing_date' => $contract->first_billing_date?->toDateString() ?? $contract->next_billing_date?->toDateString(),
+                        'ends_at' => $contract->ends_at?->toDateString(),
+                        'generate_days_before' => $contract->generate_days_before,
+                        'payment_terms_days' => $contract->payment_terms_days,
+                        'auto_generate' => $contract->auto_generate,
+                        'status' => $contract->status,
+                        'notes' => $contract->notes,
+                    ];
+                })->schema([
+                    TextInput::make('name')->required()->maxLength(255),
+                    Select::make('party_id')->options(fn (): array => Party::query()->orderBy('name')->pluck('name', 'id')->all())->searchable()->required(),
+                    Select::make('direction')->options(['income' => 'Income', 'expense' => 'Expense'])->required(),
+                    TextInput::make('amount')->numeric()->minValue(0)->required(),
+                    TextInput::make('currency')->required()->regex('/^[A-Z]{3}$/'),
+                    Select::make('billing_cycle')->options(['daily' => 'Daily', 'weekly' => 'Weekly', 'monthly' => 'Monthly', 'quarterly' => 'Quarterly', 'yearly' => 'Yearly', 'one_time' => 'One time'])->required(),
+                    DatePicker::make('starts_at')->required(),
+                    DatePicker::make('first_billing_date')->required()->afterOrEqual('starts_at'),
+                    DatePicker::make('ends_at')->afterOrEqual('starts_at'),
+                    TextInput::make('generate_days_before')->numeric()->minValue(0)->required(),
+                    TextInput::make('payment_terms_days')->numeric()->minValue(0)->required(),
+                    Toggle::make('auto_generate'),
+                    Select::make('status')->options(['draft' => 'Draft', 'active' => 'Active', 'paused' => 'Paused', 'ended' => 'Ended'])->required(),
+                    Textarea::make('notes'),
+                ])->action(function (array $arguments, array $data): void {
+                    $contract = $this->billingContractsForInstance()->findOrFail($arguments['contract_id']);
+                    Gate::authorize('update', $contract);
+                    $contract->fill($data);
+                    $contract->start_date = $data['starts_at'];
+                    $contract->end_date = $data['ends_at'] ?? null;
+                    if ($contract->billing_sequence === 0) {
+                        $contract->next_billing_date = $data['first_billing_date'];
+                    }
+                    $contract->save();
+                }),
+            Action::make('viewContractInvoices')->label('Lihat Invoice')->visible(fn (): bool => auth()->user()?->canView('billing') ?? false)
+                ->modalWidth('7xl')
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Tutup')
+                ->modalContent(function (array $arguments): View {
+                    $contract = $this->billingContractsForInstance()->with('invoices.payments')->findOrFail($arguments['contract_id']);
+                    Gate::authorize('view', $contract);
+
+                    return view('filament.resources.compute-instances.contract-invoices-modal', ['contract' => $contract]);
+                }),
             Action::make('generateManualInvoice')->label('Buat Invoice')->visible(fn (): bool => auth()->user()?->canManage('billing') ?? false)->schema([
                 Select::make('billing_contract_id')->label('Billing Contract')->options(fn (): array => $this->getRecord()->billingContracts()->orderBy('number')->pluck('name', 'id')->all())->live()->required(),
                 TextInput::make('number')->default(fn (): string => 'INV-'.now()->format('YmdHis').'-'.strtoupper(Str::random(4)))->required(),
@@ -82,7 +137,12 @@ class ViewComputeInstance extends ViewRecord
             }),
             Action::make('generateContractInvoicePdf')->label('Generate Invoice Contract')->icon('heroicon-o-document-text')->visible(fn (): bool => auth()->user()?->canView('billing') ?? false)->schema([
                 Select::make('billing_contract_ids')->label('Billing Contracts')->multiple()->options(fn (): array => $this->billingContractsForInstance()->orderBy('number')->get()->mapWithKeys(fn (BillingContract $contract): array => [$contract->id => $contract->number.' — '.$contract->name])->all())->searchable()->required(),
-            ])->action(fn (array $data) => redirect()->route('invoices.contract-unpaid-pdf', ['computeInstance' => $this->getRecord(), 'contracts' => $data['billing_contract_ids']])),
+                TextInput::make('period_month')->label('Periode Bulan')->type('month')->helperText('Kosongkan untuk semua periode.'),
+            ])->action(fn (array $data) => redirect()->route('invoices.contract-unpaid-pdf', [
+                'computeInstance' => $this->getRecord(),
+                'contracts' => $data['billing_contract_ids'],
+                ...array_filter(['period_month' => $data['period_month'] ?? null], fn ($value): bool => filled($value)),
+            ])),
             Action::make('recordInvoicePayment')->label('Bayar Invoice')->visible(fn (): bool => auth()->user()?->canManage('billing') ?? false)->fillForm(fn (array $arguments): array => ['invoice_id' => $arguments['invoice_id'] ?? null])->schema([
                 Select::make('invoice_id')->label('Invoice terbit')->options(fn (): array => $this->invoicesForInstance()->where('status', 'issued')->with('party')->get()->filter(fn (Invoice $invoice) => bccomp($invoice->outstanding, '0', 2) > 0)->mapWithKeys(fn (Invoice $invoice) => [$invoice->id => $invoice->number.' · '.$invoice->party->name.' · '.$invoice->currency.' '.$invoice->outstanding])->all())->required(),
                 DatePicker::make('paid_at')->default(today())->required(),
@@ -106,7 +166,7 @@ class ViewComputeInstance extends ViewRecord
 
     public function headerActionsWithoutService(): array
     {
-        return array_values(array_filter($this->getCachedHeaderActions(), fn (Action $action): bool => ! in_array($action->getName(), ['createService', 'createBillingContract', 'generateManualInvoice', 'generateContractInvoicePdf', 'recordInvoicePayment'], true)));
+        return array_values(array_filter($this->getCachedHeaderActions(), fn (Action $action): bool => ! in_array($action->getName(), ['createService', 'createBillingContract', 'editBillingContract', 'viewContractInvoices', 'generateManualInvoice', 'generateContractInvoicePdf', 'recordInvoicePayment'], true)));
     }
 
     public function serviceTabActions(): array
@@ -117,14 +177,6 @@ class ViewComputeInstance extends ViewRecord
     public function billingTabActions(): array
     {
         return array_values(array_filter($this->getCachedHeaderActions(), fn (Action $action): bool => in_array($action->getName(), ['createBillingContract', 'generateManualInvoice', 'generateContractInvoicePdf'], true)));
-    }
-
-    public function toggleContractInvoices(int $contractId): void
-    {
-        $contract = BillingContract::query()->findOrFail($contractId);
-        Gate::authorize('view', $contract);
-        abort_unless($contract->compute_instance_id === $this->getRecord()->id, 404);
-        $this->expandedBillingContractId = $this->expandedBillingContractId === $contractId ? null : $contractId;
     }
 
     public function removeServiceDeployment(int $deploymentId): void

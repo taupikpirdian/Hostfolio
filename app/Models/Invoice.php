@@ -84,6 +84,16 @@ class Invoice extends Model
     public function transitionTo(string $status, array $totals = []): void
     {
         Gate::authorize('update', $this);
+        $this->applyTransition($status, $totals);
+    }
+
+    public function issueAutomatically(): void
+    {
+        $this->applyTransition('issued', []);
+    }
+
+    private function applyTransition(string $status, array $totals): void
+    {
         if (! in_array($status, ['issued', 'void'], true) || ($status === 'issued' && $this->status !== 'draft') || $this->status === 'void') {
             throw ValidationException::withMessages(['status' => 'Invalid invoice transition.']);
         }
