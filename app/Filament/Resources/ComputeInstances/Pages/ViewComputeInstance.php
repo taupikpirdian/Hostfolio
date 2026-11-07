@@ -143,7 +143,13 @@ class ViewComputeInstance extends ViewRecord
                 'contracts' => $data['billing_contract_ids'],
                 ...array_filter(['period_month' => $data['period_month'] ?? null], fn ($value): bool => filled($value)),
             ])),
-            Action::make('recordInvoicePayment')->label('Bayar Invoice')->visible(fn (): bool => auth()->user()?->canManage('billing') ?? false)->fillForm(fn (array $arguments): array => ['invoice_id' => $arguments['invoice_id'] ?? null])->schema([
+            $this->recordInvoicePaymentAction(),
+        ];
+    }
+
+    private function recordInvoicePaymentAction(): Action
+    {
+        return Action::make('recordInvoicePayment')->label('Bayar Invoice')->visible(fn (): bool => auth()->user()?->canManage('billing') ?? false)->fillForm(fn (array $arguments): array => ['invoice_id' => $arguments['invoice_id'] ?? null])->schema([
                 Select::make('invoice_id')->label('Invoice terbit')->options(fn (): array => $this->invoicesForInstance()->where('status', 'issued')->with('party')->get()->filter(fn (Invoice $invoice) => bccomp($invoice->outstanding, '0', 2) > 0)->mapWithKeys(fn (Invoice $invoice) => [$invoice->id => $invoice->number.' · '.$invoice->party->name.' · '.$invoice->currency.' '.$invoice->outstanding])->all())->required(),
                 DatePicker::make('paid_at')->default(today())->required(),
                 TextInput::make('amount')->numeric()->minValue(.01)->required(),
@@ -155,8 +161,7 @@ class ViewComputeInstance extends ViewRecord
                 abort_unless($minio->exists($data['proof_path']), 422, 'File bukti tidak ditemukan di MinIO.');
                 $invoice = $this->invoicesForInstance()->findOrFail($data['invoice_id']);
                 app(RecordPayment::class)->execute($invoice, $data);
-            }),
-        ];
+            });
     }
 
     public function getHeader(): ?View
@@ -208,6 +213,22 @@ class ViewComputeInstance extends ViewRecord
             abort_if($invoice->payments()->whereNull('reversed_at')->exists(), 422, 'Invoice dengan pembayaran tidak dapat dibatalkan.');
             $invoice->transitionTo('void');
         });
+    }
+
+    public function openInvoicePayment(int $invoiceId): void
+    {
+        $invoice = $this->invoicesForInstance()->findOrFail($invoiceId);
+        Gate::authorize('update', $invoice);
+        abort_unless($invoice->status === 'issued' && bccomp($invoice->outstanding, '0', 2) > 0, 422);
+
+        $this->unmountAction();
+        $this->mountAction('recordInvoicePayment', ['invoice_id' => $invoice->id]);
+    }
+
+    public function settleZeroInvoice(int $invoiceId): void
+    {
+        $invoice = $this->invoicesForInstance()->findOrFail($invoiceId);
+        app(RecordPayment::class)->settleZeroAmount($invoice);
     }
 
     private function invoicesForInstance(): Builder

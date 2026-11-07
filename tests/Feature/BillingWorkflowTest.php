@@ -18,11 +18,14 @@ use App\Models\Party;
 use App\Models\Service;
 use App\Models\User;
 use App\Services\ReportService;
+use Filament\Actions\ActionGroup;
 use Filament\Facades\Filament;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\View;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -46,6 +49,23 @@ class BillingWorkflowTest extends TestCase
             ->assertSee('Hasil Laporan')
             ->assertSee($invoice->number)
             ->assertSee('350.000,00');
+    }
+
+    public function test_billing_destinations_are_sidebar_submenus_instead_of_overview_cards(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+        $billing = collect(Filament::getCurrentPanel()->getNavigation())
+            ->flatMap(fn ($group) => $group->getItems())
+            ->first(fn ($item) => $item->getLabel() === 'Billing');
+
+        $this->assertNotNull($billing);
+        $this->assertSame(
+            ['Contracts', 'Invoices & Bills', 'Payments', 'Clients & Vendors'],
+            array_map(fn ($item) => $item->getLabel(), $billing->getChildItems()),
+        );
+        Livewire::test(BillingOverview::class)->assertDontSee('Kelola kontrak layanan');
     }
 
     public function test_manual_invoice_can_be_created_from_compute_instance_detail(): void
@@ -151,6 +171,173 @@ class BillingWorkflowTest extends TestCase
             ->assertSet('mountedActions.0.name', 'viewContractInvoices');
 
         $this->assertStringContainsString('INV-TAB-1', $page->instance()->getMountedAction()->getModalContent()->render());
+    }
+
+    public function test_payment_action_opens_from_contract_invoice_modal(): void
+    {
+        Storage::fake('minio');
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $instance = ComputeInstance::factory()->create();
+        $party = Party::factory()->create(['type' => 'client']);
+        $contract = BillingContract::create([
+            'number' => 'PAY-MODAL-1', 'name' => 'Compute hosting', 'party_id' => $party->id,
+            'compute_instance_id' => $instance->id, 'direction' => 'income', 'amount' => '250.00',
+            'currency' => 'IDR', 'start_date' => today(), 'starts_at' => today(),
+            'first_billing_date' => today(), 'next_billing_date' => today(),
+            'billing_cycle' => 'monthly', 'status' => 'active',
+        ]);
+        $invoice = Invoice::factory()->create([
+            'number' => 'INV-PAY-MODAL-1', 'party_id' => $party->id,
+            'billing_contract_id' => $contract->id, 'status' => 'issued', 'total' => '250.00',
+        ]);
+
+        Livewire::test(ViewComputeInstance::class, ['record' => $instance->id])
+            ->mountAction('viewContractInvoices', ['contract_id' => $contract->id])
+            ->call('openInvoicePayment', $invoice->id)
+            ->assertSet('mountedActions.0.name', 'recordInvoicePayment')
+            ->assertSet('mountedActions.0.data.invoice_id', $invoice->id)
+            ->fillForm([
+                'invoice_id' => $invoice->id,
+                'paid_at' => today()->toDateString(),
+                'amount' => '100.00',
+                'method' => 'transfer',
+                'proof_path' => [UploadedFile::fake()->create('receipt.pdf', 10, 'application/pdf')],
+            ])
+            ->callMountedAction()
+            ->assertHasNoActionErrors();
+
+        $this->assertDatabaseHas('payments', ['invoice_id' => $invoice->id, 'amount' => '100.00']);
+        $this->assertTrue(Storage::disk('minio')->exists($invoice->fresh()->payments()->first()->proof_path));
+        $this->assertSame('partial', $invoice->fresh()->payment_status);
+    }
+
+    public function test_zero_amount_invoice_can_be_marked_paid_without_form_or_proof(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $instance = ComputeInstance::factory()->create();
+        $party = Party::factory()->create(['type' => 'client']);
+        $contract = BillingContract::create([
+            'number' => 'ZERO-1', 'name' => 'Free hosting', 'party_id' => $party->id,
+            'compute_instance_id' => $instance->id, 'direction' => 'income', 'amount' => '0.00',
+            'currency' => 'IDR', 'start_date' => today(), 'starts_at' => today(),
+            'first_billing_date' => today(), 'next_billing_date' => today(),
+            'billing_cycle' => 'monthly', 'status' => 'active',
+        ]);
+        $invoice = Invoice::factory()->create([
+            'number' => 'INV-ZERO-1', 'party_id' => $party->id,
+            'billing_contract_id' => $contract->id, 'status' => 'issued', 'total' => '0.00',
+        ]);
+
+        $this->assertSame('unpaid', $invoice->payment_status);
+        $page = Livewire::test(ViewComputeInstance::class, ['record' => $instance->id])
+            ->mountAction('viewContractInvoices', ['contract_id' => $contract->id]);
+        $this->assertStringContainsString('Lunas', $page->instance()->getMountedAction()->getModalContent()->render());
+        $page->call('settleZeroInvoice', $invoice->id);
+
+        $this->assertDatabaseHas('payments', [
+            'invoice_id' => $invoice->id, 'amount' => '0.00',
+            'method' => 'zero_amount', 'proof_path' => null,
+        ]);
+        $this->assertSame('paid', $invoice->fresh()->payment_status);
+        $this->assertSame(1, $invoice->payments()->count());
+    }
+
+    public function test_zero_amount_invoice_can_be_marked_paid_from_invoice_list(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $invoice = Invoice::factory()->create([
+            'party_id' => Party::factory(), 'status' => 'issued', 'total' => '0.00',
+        ]);
+
+        Livewire::test(ManageInvoices::class)
+            ->callTableAction('settleZeroAmount', $invoice)
+            ->assertHasNoTableActionErrors();
+
+        $this->assertSame('paid', $invoice->fresh()->payment_status);
+        $this->assertNull($invoice->payments()->first()->proof_path);
+    }
+
+    public function test_zero_amount_settlement_cannot_be_duplicated_and_can_be_reversed(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+        $invoice = Invoice::factory()->create([
+            'party_id' => Party::factory(), 'status' => 'issued', 'total' => '0.00',
+        ]);
+
+        $payment = app(RecordPayment::class)->settleZeroAmount($invoice);
+        try {
+            app(RecordPayment::class)->settleZeroAmount($invoice);
+            $this->fail('Pelunasan nominal nol tidak boleh dicatat dua kali.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(1, $invoice->payments()->count());
+        }
+
+        app(ReversePayment::class)->execute($payment, 'Salah tandai lunas');
+        $this->assertSame('unpaid', $invoice->fresh()->payment_status);
+    }
+
+    public function test_invoice_tabs_group_unpaid_paid_void_and_zero_amount_invoices(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $party = Party::factory()->create();
+        $draft = Invoice::factory()->create(['party_id' => $party->id, 'status' => 'draft', 'total' => '100.00']);
+        $unpaid = Invoice::factory()->create(['party_id' => $party->id, 'status' => 'issued', 'total' => '100.00']);
+        $partial = Invoice::factory()->create(['party_id' => $party->id, 'status' => 'issued', 'total' => '100.00']);
+        $partial->payments()->create(['paid_at' => today(), 'amount' => '40.00', 'method' => 'cash']);
+        $paid = Invoice::factory()->create(['party_id' => $party->id, 'status' => 'issued', 'total' => '100.00']);
+        $paid->payments()->create(['paid_at' => today(), 'amount' => '100.00', 'method' => 'cash']);
+        $zeroUnpaid = Invoice::factory()->create(['party_id' => $party->id, 'status' => 'issued', 'total' => '0.00']);
+        $zeroPaid = Invoice::factory()->create(['party_id' => $party->id, 'status' => 'issued', 'total' => '0.00']);
+        app(RecordPayment::class)->settleZeroAmount($zeroPaid);
+        $void = Invoice::factory()->create(['party_id' => $party->id, 'status' => 'void', 'total' => '100.00']);
+
+        Livewire::test(ManageInvoices::class)
+            ->assertSet('activeTab', 'all')
+            ->assertCanSeeTableRecords([$draft, $unpaid, $partial, $paid, $zeroUnpaid, $zeroPaid, $void])
+            ->set('activeTab', 'unpaid')
+            ->assertCanSeeTableRecords([$unpaid, $partial, $zeroUnpaid])
+            ->assertCanNotSeeTableRecords([$draft, $paid, $zeroPaid, $void])
+            ->set('activeTab', 'paid')
+            ->assertCanSeeTableRecords([$paid, $zeroPaid])
+            ->assertCanNotSeeTableRecords([$draft, $unpaid, $partial, $zeroUnpaid, $void])
+            ->set('activeTab', 'void')
+            ->assertCanSeeTableRecords([$void])
+            ->assertCanNotSeeTableRecords([$draft, $unpaid, $partial, $paid, $zeroUnpaid, $zeroPaid]);
+    }
+
+    public function test_invoice_list_groups_actions_and_colors_payment_status_badges(): void
+    {
+        $this->actingAs(User::factory()->create(['role' => 'admin']));
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+        $table = Livewire::test(ManageInvoices::class)->instance()->getTable();
+        $actions = $table->getRecordActions();
+        $invoice = Invoice::factory()->create(['party_id' => Party::factory()]);
+
+        $this->assertCount(1, $actions);
+        $this->assertInstanceOf(ActionGroup::class, $actions[0]);
+        $actions[0]->record($invoice);
+        $this->assertTrue($actions[0]->isIconButton());
+        $this->assertSame('Aksi invoice '.$invoice->number, $actions[0]->getLabel());
+        $this->assertSame('heroicon-m-ellipsis-vertical', $actions[0]->getIcon());
+        $this->assertSame('bottom-end', $actions[0]->getDropdownPlacement());
+        $this->assertSame(['view', 'edit', 'issue', 'recordPayment', 'settleZeroAmount', 'void'], array_keys($actions[0]->getFlatActions()));
+        $menu = $actions[0]->getFlatActions();
+        $this->assertSame('Lihat', $menu['view']->getLabel());
+        $this->assertSame('Bayar', $menu['recordPayment']->getLabel());
+        $this->assertSame('Batalkan', $menu['void']->getLabel());
+        foreach ($menu as $action) {
+            $this->assertNotNull($action->getIcon(), $action->getName().' perlu ikon.');
+        }
+
+        $paymentStatus = $table->getColumn('payment_status');
+        $this->assertTrue($paymentStatus->isBadge());
+        $this->assertSame('success', $paymentStatus->getColor('paid'));
+        $this->assertSame('warning', $paymentStatus->getColor('partial'));
+        $this->assertSame('danger', $paymentStatus->getColor('unpaid'));
     }
 
     public function test_invoice_pdf_contains_item_and_instance_details(): void

@@ -31,22 +31,22 @@ class DashboardService
 
         $unpaidQuery = Invoice::query()
             ->where('status', 'issued')
-            ->whereRaw('total > (select COALESCE(SUM(amount), 0) from payments where payments.invoice_id = invoices.id and payments.reversed_at is null)');
+            ->where(fn ($query) => $query
+                ->whereRaw('invoices.total > 0 AND invoices.total > (select COALESCE(SUM(amount), 0) from payments where payments.invoice_id = invoices.id and payments.reversed_at is null)')
+                ->orWhere(fn ($query) => $query
+                    ->where('invoices.total', 0)
+                    ->whereDoesntHave('payments', fn ($payments) => $payments->whereNull('reversed_at')->where('method', 'zero_amount'))));
         $unpaidCount = $canViewBilling ? (clone $unpaidQuery)->count() : 0;
         $unpaidAmount = $canViewBilling
             ? (string) (clone $unpaidQuery)->selectRaw('COALESCE(SUM(total - (select COALESCE(SUM(amount), 0) from payments where payments.invoice_id = invoices.id and payments.reversed_at is null)), 0) as outstanding')->value('outstanding')
             : '0';
+        $unpaidInvoices = $canViewBilling
+            ? (clone $unpaidQuery)->with(['party', 'payments'])->orderBy('due_date')->orderBy('id')->limit(4)->get()
+            : collect();
 
         $financial = $canViewBilling ? $reports->financialSummary($from->toDateString(), $to->toDateString()) : [];
         $activeContractCount = $canViewBilling ? DB::table('billing_contracts')->where('status', 'active')->count() : 0;
         $monthlyCashflow = $canViewBilling ? $this->monthlyCashflow($from, $to) : [];
-        $renewalRows = $canViewBilling ? $reports->rows('renewals', days: 365, page: 1, perPage: 4) : [];
-        $renewalsWithin30Days = 0;
-        if ($canViewBilling) {
-            $reports->rows('renewals', days: 30, page: 1, perPage: 1);
-            $renewalsWithin30Days = $reports->totalRows;
-        }
-
         $physicalServer = $canViewInventory
             ? PhysicalServer::query()->with('provider')->withCount('directInstances')->where('status', 'active')->orderBy('name')->first()
             : null;
@@ -76,11 +76,10 @@ class DashboardService
             'computeInstanceCount' => $canViewInventory ? ComputeInstance::count() : 0,
             'unpaidCount' => $unpaidCount,
             'unpaidAmount' => $unpaidAmount,
+            'unpaidInvoices' => $unpaidInvoices,
             'financial' => $financial,
             'activeContractCount' => $activeContractCount,
             'monthlyCashflow' => $monthlyCashflow,
-            'renewalRows' => $renewalRows,
-            'renewalsWithin30Days' => $renewalsWithin30Days,
             'physicalServer' => $physicalServer,
             'instanceCounts' => $instanceCounts,
             'services' => $services,

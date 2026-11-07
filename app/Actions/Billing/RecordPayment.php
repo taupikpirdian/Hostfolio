@@ -11,6 +11,24 @@ use Illuminate\Validation\ValidationException;
 
 class RecordPayment
 {
+    public function settleZeroAmount(Invoice $invoice): Payment
+    {
+        Gate::authorize('update', $invoice);
+
+        return DB::transaction(function () use ($invoice): Payment {
+            $invoice = Invoice::query()->lockForUpdate()->findOrFail($invoice->id);
+            if ($invoice->status !== 'issued' || bccomp($invoice->total, '0', 2) !== 0 || $invoice->payments()->whereNull('reversed_at')->exists()) {
+                throw ValidationException::withMessages(['invoice' => 'Hanya invoice terbit bernilai nol yang belum lunas dapat ditandai lunas.']);
+            }
+
+            return $invoice->payments()->create([
+                'paid_at' => today(),
+                'amount' => '0.00',
+                'method' => 'zero_amount',
+            ]);
+        });
+    }
+
     public function execute(Invoice $invoice, array $data): Payment
     {
         Gate::authorize('update', $invoice);

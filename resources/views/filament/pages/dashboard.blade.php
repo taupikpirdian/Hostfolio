@@ -41,11 +41,6 @@
             </div>
         </header>
 
-        <div class="flex items-start gap-3 rounded-xl border border-blue-100 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/70 px-4 py-3 text-sm text-blue-900 dark:text-blue-200">
-            <x-filament::icon icon="heroicon-o-information-circle" class="mt-0.5 size-5 shrink-0 text-blue-600 dark:text-blue-400" />
-            <p>Data dashboard berasal dari catatan inventory dan transaksi. Alokasi resource bukan monitoring CPU/RAM secara real-time.</p>
-        </div>
-
         <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Ringkasan">
             @if ($canViewInventory)
                 <article class="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5 shadow-sm">
@@ -156,21 +151,21 @@
             @if ($canViewBilling)
                 <article class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
                     <div class="flex items-start justify-between gap-3 p-5">
-                        <div><h2 class="font-bold text-slate-900 dark:text-slate-100">Upcoming Renewals</h2><p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Kontrak dan domain dengan tanggal perpanjangan terdekat</p></div>
-                        <span class="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{{ number_format($renewalsWithin30Days) }} dalam 30 hari</span>
+                        <div><h2 class="font-bold text-slate-900 dark:text-slate-100">Invoice Belum Dibayar</h2><p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Tagihan yang masih memiliki pembayaran tertunda</p></div>
+                        <span class="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400">{{ number_format($unpaidCount) }} invoice</span>
                     </div>
                     <div class="divide-y divide-slate-100 dark:divide-slate-800 px-5">
-                        @forelse ($renewalRows as $renewal)
+                        @forelse ($unpaidInvoices as $invoice)
                             <div class="flex items-center gap-3 py-3">
-                                <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400"><x-filament::icon icon="heroicon-o-globe-alt" class="size-4" /></span>
-                                <div class="min-w-0 flex-1"><p class="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{{ $renewal['Reference'] }}</p><p class="text-xs text-slate-400 dark:text-slate-400">{{ $renewal['Party'] ?: $renewal['Kind'] }} · {{ $renewal['Kind'] }}</p></div>
-                                <div class="shrink-0 text-right"><p class="text-xs font-semibold text-slate-700 dark:text-slate-200">{{ \Illuminate\Support\Carbon::parse($renewal['Renewal date'])->locale('id')->translatedFormat('d M Y') }}</p><p class="text-xs text-slate-400 dark:text-slate-400">{{ $renewal['Days remaining'] < 0 ? abs($renewal['Days remaining']).' hari lalu' : $renewal['Days remaining'].' hari lagi' }}</p></div>
+                                <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400"><x-filament::icon icon="heroicon-o-document-text" class="size-4" /></span>
+                                <div class="min-w-0 flex-1"><p class="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">{{ $invoice->number }}</p><p class="truncate text-xs text-slate-400 dark:text-slate-400">{{ $invoice->party?->name ?? 'Tanpa pihak' }} · Jatuh tempo {{ $invoice->due_date->locale('id')->translatedFormat('d M Y') }}</p></div>
+                                <div class="shrink-0 text-right"><p class="text-xs font-semibold text-slate-700 dark:text-slate-200">Rp{{ number_format((float) $invoice->outstanding, 0, ',', '.') }}</p><p class="text-xs text-slate-400 dark:text-slate-400">{{ $invoice->payment_status === 'partial' ? 'Sebagian dibayar' : 'Belum dibayar' }}</p></div>
                             </div>
                         @empty
-                            <p class="py-8 text-center text-sm text-slate-400 dark:text-slate-400">Belum ada jadwal renewal.</p>
+                            <p class="py-8 text-center text-sm text-slate-400 dark:text-slate-400">Tidak ada invoice yang belum dibayar.</p>
                         @endforelse
                     </div>
-                    <div class="border-t border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/70 px-5 py-3 text-xs text-slate-400 dark:text-slate-400">Tanggal renewal mengikuti kontrak aktif dan masa berlaku domain.</div>
+                    <a href="{{ $invoiceUrl }}" class="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/70 px-5 py-3 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800">Lihat semua invoice <span aria-hidden="true">→</span></a>
                 </article>
             @endif
 
@@ -202,7 +197,7 @@
         @if ($canViewInventory)
             <section class="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
                 <div class="flex flex-col gap-3 border-b border-slate-100 dark:border-slate-800 p-5 lg:flex-row lg:items-center lg:justify-between">
-                    <div><h2 class="font-bold text-slate-900 dark:text-slate-100">Hosted Services</h2><p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Daftar aplikasi terdaftar beserta provider dan masa aktifnya</p></div>
+                    <div><h2 class="font-bold text-slate-900 dark:text-slate-100">Hosted Services</h2><p class="mt-0.5 text-sm text-slate-500 dark:text-slate-400">Daftar aplikasi terdaftar beserta instance dan masa aktifnya</p></div>
                     <div class="flex flex-wrap gap-2">
                         <label class="relative"><span class="sr-only">Cari service</span><x-filament::icon icon="heroicon-o-magnifying-glass" class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400 dark:text-slate-400" /><input type="search" wire:model.live.debounce.300ms="serviceSearch" placeholder="Cari service..." class="bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 placeholder:text-slate-400 min-h-9 w-56 rounded-lg border-slate-200 dark:border-slate-700 pl-9 text-sm focus:border-blue-500 focus:ring-blue-500"></label>
                         <label><span class="sr-only">Filter status</span><select wire:model.live="serviceStatus" class="min-h-9 rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-600 dark:text-slate-300 focus:border-blue-500 focus:ring-blue-500"><option value="all">All Status</option><option value="running">Running</option><option value="stopped">Stopped</option><option value="draft">Draft</option><option value="archived">Archived</option></select></label>
@@ -210,7 +205,7 @@
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full min-w-[900px] text-left text-sm">
-                        <thead class="bg-slate-50 dark:bg-slate-800 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-400"><tr><th class="px-5 py-3">Service</th><th class="px-4 py-3">Provider</th><th class="px-4 py-3">Resource (legacy)</th><th class="px-4 py-3">Periode Akhir</th><th class="px-4 py-3">Amount (legacy)</th><th class="px-4 py-3">Status</th></tr></thead>
+                        <thead class="bg-slate-50 dark:bg-slate-800 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-400"><tr><th class="px-5 py-3">Service</th><th class="px-4 py-3">Instance</th><th class="px-4 py-3">Resource</th><th class="px-4 py-3">Status</th></tr></thead>
                         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
                             @forelse ($services as $service)
                                 @php
@@ -220,19 +215,22 @@
                                     $legacy = $service->legacy_data ?? [];
                                     $vcpu = $allocation?->vcpu ?? ($legacy['vcpu'] ?? null);
                                     $ram = $allocation?->ram_mb ?? ($legacy['ram_mb'] ?? null);
-                                    $amount = $legacy['amount'] ?? null;
-                                    $amountDisplay = is_numeric($amount) ? 'Rp'.number_format((float) $amount, 0, ',', '.') : ($amount ?: '—');
+                                    $ramGb = $ram === null ? null : rtrim(rtrim(number_format((float) $ram / 1024, 2, ',', '.'), '0'), ',');
                                 @endphp
                                 <tr class="transition hover:bg-slate-50/70 dark:hover:bg-slate-800/70">
                                     <td class="px-5 py-3"><div class="flex items-center gap-3"><span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400"><x-filament::icon icon="heroicon-o-globe-alt" class="size-4" /></span><div><p class="font-semibold text-slate-800 dark:text-slate-200">{{ $service->name }}</p><p class="text-xs text-slate-400 dark:text-slate-400">{{ str($service->type)->replace('_', ' ')->title() }}</p></div></div></td>
-                                    <td class="px-4 py-3 text-slate-500 dark:text-slate-400">{{ $instance?->provider?->name ?? $instance?->physicalServer?->provider?->name ?? 'Belum dipetakan' }}</td>
-                                    <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{{ $vcpu !== null || $ram !== null ? ($vcpu ?? '?').' vCPU · '.($ram ?? '?').' RAM' : '—' }}<span class="block text-xs text-slate-400 dark:text-slate-400">{{ $allocation ? 'Alokasi terstruktur' : 'Estimasi dari Sheet' }}</span></td>
-                                    <td class="px-4 py-3 text-slate-500 dark:text-slate-400">{{ $legacy['end_date'] ?? 'Belum diisi' }}</td>
-                                    <td class="px-4 py-3 text-slate-500 dark:text-slate-400">{{ $amountDisplay }}</td>
+                                    <td class="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                        @if ($instance)
+                                            <a href="{{ \App\Filament\Resources\ComputeInstances\ComputeInstanceResource::getUrl('view', ['record' => $instance]) }}" class="font-medium text-blue-600 hover:underline dark:text-blue-400">{{ $instance->name }}</a>
+                                        @else
+                                            Belum dipetakan
+                                        @endif
+                                    </td>
+                                    <td class="px-4 py-3 text-slate-600 dark:text-slate-300">{{ $vcpu !== null || $ram !== null ? ($vcpu ?? '?').' vCPU · '.($ramGb ?? '?').' GB RAM' : '—' }}<span class="block text-xs text-slate-400 dark:text-slate-400">{{ $allocation ? 'Alokasi terstruktur' : 'Estimasi dari Sheet' }}</span></td>
                                     <td class="px-4 py-3"><span @class(['rounded-full px-2 py-1 text-xs font-semibold', 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' => $service->status === 'running', 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300' => $service->status === 'draft', 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300' => in_array($service->status, ['stopped', 'archived'], true)])>{{ str($service->status)->ucfirst() }}</span></td>
                                 </tr>
                             @empty
-                                <tr><td colspan="6" class="px-5 py-12 text-center text-sm text-slate-400 dark:text-slate-400">Tidak ada service yang cocok dengan pencarian ini.</td></tr>
+                                <tr><td colspan="4" class="px-5 py-12 text-center text-sm text-slate-400 dark:text-slate-400">Tidak ada service yang cocok dengan pencarian ini.</td></tr>
                             @endforelse
                         </tbody>
                     </table>

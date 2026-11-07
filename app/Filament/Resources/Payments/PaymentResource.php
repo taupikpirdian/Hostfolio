@@ -2,14 +2,11 @@
 
 namespace App\Filament\Resources\Payments;
 
-use App\Actions\Billing\ReversePayment;
 use App\Filament\Resources\Payments\Pages\ManagePayments;
 use App\Models\Payment;
-use Filament\Actions\Action;
 use Filament\Actions\ViewAction;
-use Filament\Forms\Components\Textarea;
 use Filament\Infolists\Components\TextEntry;
-use Filament\Notifications\Notification;
+use Filament\Infolists\Components\ViewEntry;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
@@ -37,15 +34,38 @@ class PaymentResource extends Resource
 
     public static function infolist(Schema $schema): Schema
     {
-        return $schema->components([TextEntry::make('invoice.number'), TextEntry::make('paid_at')->date(), TextEntry::make('amount')->money('IDR'), TextEntry::make('method'), TextEntry::make('reference'), TextEntry::make('notes'), TextEntry::make('reversed_at')->dateTime(), TextEntry::make('reversal_reason')]);
+        return $schema->components([
+            TextEntry::make('invoice.number'),
+            TextEntry::make('paid_at')->date(),
+            TextEntry::make('amount')->money('IDR'),
+            TextEntry::make('method'),
+            TextEntry::make('notes'),
+            ViewEntry::make('proof_path')
+                ->view('filament.resources.payments.proof-preview')
+                ->viewData(fn (Payment $record): array => [
+                    'payment' => $record,
+                    'previewUrl' => URL::temporarySignedRoute('payments.proof', now()->addMinutes(5), ['payment' => $record->id, 'preview' => 1]),
+                ])
+                ->columnSpanFull()
+                ->visible(fn (Payment $record): bool => filled($record->proof_path)),
+        ]);
     }
 
     public static function table(Table $table): Table
     {
-        return $table->modifyQueryUsing(fn (Builder $query) => $query->with('invoice'))->columns([TextColumn::make('invoice.number')->searchable(), TextColumn::make('paid_at')->date()->sortable(), TextColumn::make('amount')->money('IDR')->sortable(), TextColumn::make('method'), TextColumn::make('reference')->searchable(), TextColumn::make('reversed_at')->dateTime()])->filters([Filter::make('valid')->query(fn (Builder $query) => $query->whereNull('reversed_at')), Filter::make('reversed')->query(fn (Builder $query) => $query->whereNotNull('reversed_at'))])->recordActions([ViewAction::make(), Action::make('downloadProof')->label('Proof')->visible(fn (Payment $record) => filled($record->proof_path) && auth()->user()->can('view', $record))->url(fn (Payment $record) => URL::temporarySignedRoute('payments.proof', now()->addMinutes(5), ['payment' => $record->id]))->openUrlInNewTab(), Action::make('reverse')->color('danger')->requiresConfirmation()->visible(fn (Payment $record) => $record->reversed_at === null && auth()->user()->can('update', $record))->schema([Textarea::make('reason')->required()->minLength(3)])->action(function (Payment $record, array $data): void {
-            app(ReversePayment::class)->execute($record, $data['reason']);
-            Notification::make()->title('Payment reversed; history retained')->success()->send();
-        })]);
+        return $table
+            ->modifyQueryUsing(fn (Builder $query) => $query->with('invoice'))
+            ->columns([
+                TextColumn::make('invoice.number')->searchable(),
+                TextColumn::make('paid_at')->date()->sortable(),
+                TextColumn::make('amount')->money('IDR')->sortable(),
+                TextColumn::make('method'),
+            ])
+            ->filters([
+                Filter::make('valid')->query(fn (Builder $query) => $query->whereNull('reversed_at')),
+                Filter::make('reversed')->query(fn (Builder $query) => $query->whereNotNull('reversed_at')),
+            ])
+            ->recordActions([ViewAction::make()->modalWidth('5xl')]);
     }
 
     public static function getPages(): array

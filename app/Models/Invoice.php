@@ -69,6 +69,14 @@ class Invoice extends Model
 
     public function getPaymentStatusAttribute(): string
     {
+        if ($this->status === 'issued' && bccomp($this->total, '0', 2) === 0) {
+            $settled = $this->relationLoaded('payments')
+                ? $this->payments->whereNull('reversed_at')->contains('method', 'zero_amount')
+                : $this->payments()->whereNull('reversed_at')->where('method', 'zero_amount')->exists();
+
+            return $settled ? 'paid' : 'unpaid';
+        }
+
         if (bccomp($this->paid_total, '0', 2) === 0) {
             return 'unpaid';
         }

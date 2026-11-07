@@ -13,8 +13,11 @@ class PaymentProofController extends Controller
     {
         Gate::authorize('view', $payment);
         abort_unless($payment->proof_path && str_starts_with($payment->proof_path, 'payment-proofs/') && ! str_contains($payment->proof_path, '..'), 404);
-        abort_unless(Storage::disk('local')->exists($payment->proof_path), 404);
+        $disk = Storage::disk('local')->exists($payment->proof_path) ? Storage::disk('local') : Storage::disk('minio');
+        abort_unless($disk->exists($payment->proof_path), 404);
 
-        return Storage::disk('local')->download($payment->proof_path);
+        return request()->boolean('preview')
+            ? $disk->response($payment->proof_path)
+            : $disk->download($payment->proof_path);
     }
 }

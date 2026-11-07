@@ -15,7 +15,7 @@
                         <td class="p-2 text-right">{{ $invoice->currency }} {{ $invoice->total }}</td>
                         <td class="p-2 text-center"><x-filament::badge :color="match ($invoice->status) { 'issued' => 'info', 'void' => 'danger', default => 'gray' }">{{ ucfirst($invoice->status) }}</x-filament::badge></td>
                         <td class="p-2 text-center"><x-filament::badge :color="match ($invoice->payment_status) { 'paid' => 'success', 'partial' => 'warning', default => 'danger' }">{{ ucfirst($invoice->payment_status) }}</x-filament::badge></td>
-                        <td class="p-2 text-center">@foreach ($invoice->payments->whereNull('reversed_at') as $payment)<a class="text-primary-600 hover:underline" href="{{ app(\App\Services\MinioStorage::class)->temporaryUrl($payment->proof_path) }}" target="_blank">Bukti</a>@endforeach</td>
+                        <td class="p-2 text-center">@foreach ($invoice->payments->whereNull('reversed_at')->whereNotNull('proof_path') as $payment)<a class="text-primary-600 hover:underline" href="{{ app(\App\Services\MinioStorage::class)->temporaryUrl($payment->proof_path) }}" target="_blank">Bukti</a>@endforeach</td>
                         <td class="p-2 text-center">
                             <x-filament::dropdown placement="bottom-end" width="xs">
                                 <x-slot name="trigger">
@@ -27,7 +27,10 @@
                                         <x-filament::dropdown.list.item icon="heroicon-m-x-circle" color="danger" wire:click="cancelInvoice({{ $invoice->id }})" wire:confirm="Batalkan invoice ini?">Batalkan</x-filament::dropdown.list.item>
                                     @endif
                                     @if ($invoice->status === 'issued' && bccomp($invoice->outstanding, '0', 2) > 0)
-                                        <x-filament::dropdown.list.item icon="heroicon-m-banknotes" wire:click="mountAction('recordInvoicePayment', { invoice_id: {{ $invoice->id }} })">Bayar</x-filament::dropdown.list.item>
+                                        <x-filament::dropdown.list.item icon="heroicon-m-banknotes" wire:click="openInvoicePayment({{ $invoice->id }})">Bayar</x-filament::dropdown.list.item>
+                                    @endif
+                                    @if ($invoice->status === 'issued' && bccomp($invoice->total, '0', 2) === 0 && $invoice->payment_status !== 'paid')
+                                        <x-filament::dropdown.list.item icon="heroicon-m-check-circle" wire:click="settleZeroInvoice({{ $invoice->id }})">Lunas</x-filament::dropdown.list.item>
                                     @endif
                                 </x-filament::dropdown.list>
                             </x-filament::dropdown>

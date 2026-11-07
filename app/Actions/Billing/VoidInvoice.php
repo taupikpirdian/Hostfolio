@@ -15,7 +15,7 @@ class VoidInvoice
 
         return DB::transaction(function () use ($invoice): Invoice {
             $invoice = Invoice::query()->lockForUpdate()->findOrFail($invoice->id);
-            if ($invoice->status === 'void' || bccomp($invoice->paid_total, '0', 2) > 0) {
+            if ($invoice->status === 'void' || $invoice->payments()->whereNull('reversed_at')->exists()) {
                 throw ValidationException::withMessages(['invoice' => 'Reverse all payments before voiding this invoice.']);
             }
             $invoice->transitionTo('void');

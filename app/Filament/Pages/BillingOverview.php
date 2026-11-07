@@ -2,10 +2,6 @@
 
 namespace App\Filament\Pages;
 
-use App\Filament\Resources\BillingContracts\BillingContractResource;
-use App\Filament\Resources\Invoices\InvoiceResource;
-use App\Filament\Resources\Parties\PartyResource;
-use App\Filament\Resources\Payments\PaymentResource;
 use App\Models\Invoice;
 use App\Services\DashboardService;
 use Filament\Support\Icons\Heroicon;
@@ -51,13 +47,6 @@ class BillingOverview extends Reports
             'cashflowMonths' => app(DashboardService::class)->monthlyCashflow($from, $to),
             'chartFrom' => $from,
             'chartTo' => $to,
-            'billingLinks' => [
-                ['title' => 'Contracts', 'subtitle' => 'Kelola kontrak layanan', 'icon' => 'heroicon-o-document-text', 'url' => BillingContractResource::getUrl('index')],
-                ['title' => 'Invoices & Bills', 'subtitle' => 'Kelola invoice & tagihan', 'icon' => 'heroicon-o-document-currency-dollar', 'url' => InvoiceResource::getUrl('index')],
-                ['title' => 'Payments', 'subtitle' => 'Catatan pembayaran', 'icon' => 'heroicon-o-circle-stack', 'url' => PaymentResource::getUrl('index')],
-                ['title' => 'Clients & Vendors', 'subtitle' => 'Kelola klien & vendor', 'icon' => 'heroicon-o-user-group', 'url' => PartyResource::getUrl('index')],
-                ['title' => 'Renewals', 'subtitle' => 'Jadwal & status renewal', 'icon' => 'heroicon-o-arrow-path', 'url' => Renewals::getUrl()],
-            ],
         ];
     }
 
