@@ -12,17 +12,12 @@ services:
       - .env
     environment:
       CONTAINER_ROLE: app
-      REDIS_HOST: redis
-      CONTENT_VIEW_DEDUP_STORE: redis
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - app_storage_hostfolio:/var/www/storage
     networks:
       - app_network
-    depends_on:
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "php", "-r", "exit(@fsockopen('127.0.0.1', 9000, $$errno, $$errstr, 2) ? 0 : 1);"]
       interval: 5s
@@ -38,8 +33,6 @@ services:
       - .env
     environment:
       CONTAINER_ROLE: scheduler
-      REDIS_HOST: redis
-      CONTENT_VIEW_DEDUP_STORE: redis
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["php", "artisan", "schedule:work"]
