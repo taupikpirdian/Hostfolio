@@ -59,8 +59,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY resources ./resources
+COPY app/Filament ./app/Filament
 COPY public ./public
 COPY vite.config.js ./
+COPY --from=vendor /var/www/vendor ./vendor
 
 RUN npm run build
 
