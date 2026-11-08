@@ -10,6 +10,7 @@ use App\Policies\InventoryPolicy;
 use App\Policies\SettingsPolicy;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -18,6 +19,10 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        if (! $this->app->environment('local')) {
+            URL::forceScheme('https');
+        }
+
         TrustProxies::at(config('app.trusted_proxies', []));
         foreach (['Provider', 'PhysicalServer', 'ComputeInstance', 'ResourceAllocation', 'Service', 'ServiceDeployment', 'Domain', 'ImportBatch', 'ImportRow'] as $name) {
             $class = 'App\\Models\\'.$name;
